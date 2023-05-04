@@ -104,20 +104,25 @@ def main(args):
     # criterion = ASLSingleLabel().to(device)#EQLv2(num_classes=num_classes).to(device)
     # tran_sampler = ClassPrioritySampler(train_dataset, manual_only=True)
     train_sampler = CBEffectNumSampler(train_dataset)
-    train_sampler = ClassAwareSampler(train_dataset, num_samples_cls=4)
+    train_sampler = ClassAwareSampler(train_dataset, num_samples_cls=4) 
     train_loader = DataLoader(train_dataset, sampler=train_sampler, shuffle=False, batch_size=args.batch_size, num_workers=4, pin_memory=False, drop_last=True)
     train_loader_ibs = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size, pin_memory=True, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=int(args.batch_size), num_workers=4, shuffle=False)
+
+    # extractor 是 phase1 的模型，用 PromptModels文件夹下的结构加载
     extractor = build_promptmodel(num_classes=num_classes, img_size=args.image_size, base_model=args.base_model, model_idx='ViT', patch_size=16,
                             Prompt_Token_num=args.prompt_length, VPT_type="Deep")
     ckpt = torch.load('phase1.pth', 'cpu')['state_dict']
+    # ckpt = torch.load('LPT_places.pth', 'cpu')['state_dict']
     if list(ckpt.keys())[0].startswith('module'):
        ckpt_new = {}
        for key in ckpt.keys():
            ckpt_new[key[7:]] = ckpt[key]
        ckpt = ckpt_new
     extractor.load_state_dict(ckpt)
-    extractor.prompt_learner.head = nn.Identity()
+    extractor.prompt_learner.head = nn.Identity() # 把phase1的head去掉，这样就可以把token留下来。
+    
+    # model 是 phase2 的模型，用 PromptModels_pool文件夹下的结构加载
     model = build_promptmodel_pool(num_classes=num_classes, img_size=args.image_size, base_model=args.base_model, model_idx='ViT', patch_size=16,
                             Prompt_Token_num=args.prompt_length, VPT_type="Deep")  # VPT_type = "Shallow"
     # test for updating
@@ -153,7 +158,7 @@ def main(args):
         # model.Freeze()
         cnt = 0
         for imgs, targets in tqdm(train_loader, desc='train', leave=False):
-            imgs_ibs, targets_ibs = next(iter(train_loader_ibs))
+            imgs_ibs, targets_ibs = next(iter(train_loader_ibs)) # 两个都加载？
             if cnt > len(train_dataset) // args.batch_size:
                 break
             cnt += 1
@@ -164,11 +169,12 @@ def main(args):
             outputs, reduced_sim = model(imgs)
             outputs_ibs, reduced_sim_ibs = model(imgs_ibs)
             loss = criterion(outputs, targets) - 0.5 * reduced_sim + max(0.0, (0.5 * (args.epochs - epoch) / args.epochs)) * (criterion_ibs(outputs_ibs, targets_ibs) - 0.5 * reduced_sim_ibs)
+            # 两个都训练
             loss.backward()
             optimizer.step()
             acc = compute_acc(outputs, targets)
-            aves['tl'].add(loss.item())
-            aves['ta'].add(acc)
+            aves['tl'].add(loss.item()) #train loss
+            aves['ta'].add(acc) # train acc
 
             iter_num += 1
         # print()

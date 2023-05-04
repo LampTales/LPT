@@ -273,6 +273,9 @@ def create_datasets(data_path, train_transforms, val_transforms, name='cifar100'
         elif name == 'imbalancedcifar100_10':
             return imbalanced_cifar100_full_datasets_10(data_path, train_transforms, val_transforms)
         elif name == 'places365':
-            return Places365_LT_full_datasets('/hdd1/dongbowen/data/places365_standard', train_transforms, val_transforms)
+            # return Places365_LT_full_datasets('/hdd1/dongbowen/data/places365_standard', train_transforms, val_transforms)
+            # return Places365_LT_full_datasets('/home/yecm/yecanming/repo/new_things_exploring/prompt_learning/Place_365_Standard', 
+            return Places365_LT_full_datasets('/data/dataset/Place_365_Standard', 
+                                              train_transforms, val_transforms)
         elif name == 'imagenet_lt':
             return ImageNet_LT_full_datasets('/home/ubuntu/dongbowen/data/imagenet/', train_transforms, val_transforms)

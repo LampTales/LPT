@@ -1,11 +1,8 @@
 """
-实验1
-
-训练原味VPT
+实验2
+训练Linear Probing，看看Probing的效果
 - 首先是在IN21K上学习过的ViT
-- 在CIFAR100-LT上面提示微调
-- LT上无法达到前沿效果， 因为没有使用任何针对不平衡的策略。
-
+- 在CIFAR100-LT上面 仅仅进行分类学习
 """
 from comet_ml import Experiment
 from clearml import Task
@@ -82,7 +79,7 @@ parser.add_argument('--warmup_epochs', type=int, default=10)
 parser.add_argument('--optimizer', type=str, default='sgd')
 parser.add_argument('--scheduler', type=str, default='cosine')
 parser.add_argument('--prompt_length', type=int, default=10)
-parser.add_argument('--name', type=str, default='vpt_deep_tuned_cifar-lt') # 决定保存模型的位置
+parser.add_argument('--name', type=str, default='vit_linear_probe_cifar-lt') # 决定保存模型的位置
 parser.add_argument('--base_model', type=str, default='vit_base_patch16_224_in21k')
 
 def setup_seed(seed):  # setting up the random seed
@@ -137,9 +134,20 @@ def main(args):
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=8, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=int(args.batch_size), shuffle=False)
 
-    model = build_promptmodel(num_classes=num_classes, img_size=args.image_size, 
-                              base_model=args.base_model, model_idx='ViT', patch_size=16,
-                            Prompt_Token_num=args.prompt_length, VPT_type="Deep")  # VPT_type = "Shallow"
+    # model = build_promptmodel(num_classes=num_classes, img_size=args.image_size, 
+    #                           base_model=args.base_model, model_idx='ViT', patch_size=16,
+    #                         Prompt_Token_num=args.prompt_length, VPT_type="Deep")  # VPT_type = "Shallow"
+    import timm
+
+    model = timm.create_model(args.base_model,
+                                    pretrained=True)
+    for param in model.parameters():
+        param.requires_grad_(False)
+    model.head = nn.Linear(768, num_classes) # 应该默认时kaiming
+    for param in model.head.parameters():
+        param.requires_grad_(True)
+    
+
     # test for updating 不影响正常运行
     # prompt_state_dict = model.obtain_prompt()
     # model.load_prompt(prompt_state_dict)
@@ -153,7 +161,6 @@ def main(args):
     criterion = nn.CrossEntropyLoss()
     
     
-    model.Freeze()
     # model = torch.nn.parallel.DataParallel(model)
     # model = torch.compile(model, mode='max-autotune')
     

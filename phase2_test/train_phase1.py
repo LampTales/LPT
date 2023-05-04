@@ -1,10 +1,11 @@
 """
-实验1
-
-训练原味VPT
+训练高级VPT（Phase1）
 - 首先是在IN21K上学习过的ViT
 - 在CIFAR100-LT上面提示微调
-- LT上无法达到前沿效果， 因为没有使用任何针对不平衡的策略。
+- 加入大量bag of tricks
+ - CosineLRScheduler
+ - AGCL
+ - ClassAwareSampler
 
 """
 from comet_ml import Experiment
@@ -28,20 +29,24 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from tqdm import tqdm
-from PromptModels.GetPromptModel import build_promptmodel
 import argparse
-from torch.optim.lr_scheduler import OneCycleLR
+# from torch.optim.lr_scheduler import OneCycleLR
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data.dataloader import DataLoader
-
-from timm.scheduler import CosineLRScheduler
-
 from datasets import create_datasets
 from utils import *
 from pathlib import Path
-
 import torch.backends.cudnn
+
+from PromptModels.GetPromptModel import build_promptmodel
+
+from timm.scheduler import CosineLRScheduler
+from cb_loss import AGCL
+from sampler import ClassPrioritySampler, ClassAwareSampler, BalancedDatasetSampler, CBEffectNumSampler
+
+
+
 
 tensorboard = None
 def init_trackers(args, project_name='Long-tailed Prompt Tuning', task_name='Tune VPT on CIFAR-LT'):
@@ -68,22 +73,24 @@ parser.add_argument('--dataset', type=str, default='imbalancedcifar100_100')
 parser.add_argument('--split', type=str, default='full')
 parser.add_argument('--data_path', type=str, default='data/')
 # parser.add_argument('--batch_size', type=int, default=128)
-parser.add_argument('--batch_size', type=int, default=64)
-# parser.add_argument('--batch_size', type=int, default=32)
+# parser.add_argument('--batch_size', type=int, default=64)
+parser.add_argument('--batch_size', type=int, default=32)
 
-parser.add_argument('--base_lr', type=float, default=0.01)
+parser.add_argument('--base_lr', type=float, default=0.02)
 parser.add_argument('--lr', type=float, default=0.005)
 parser.add_argument('--momentum', type=float, default=0.9)
-# parser.add_argument('--weight_decay', type=float, default=0.01)
-parser.add_argument('--weight_decay', type=float, default=0.03)
+parser.add_argument('--weight_decay', type=float, default=0.01)
+# parser.add_argument('--weight_decay', type=float, default=0.03)
 parser.add_argument('--image_size', type=int, default=224)
-parser.add_argument('--epochs', type=int, default=100)
-parser.add_argument('--warmup_epochs', type=int, default=10)
+parser.add_argument('--epochs', type=int, default=90)
+parser.add_argument('--warmup_epochs', type=int, default=1)
 parser.add_argument('--optimizer', type=str, default='sgd')
 parser.add_argument('--scheduler', type=str, default='cosine')
 parser.add_argument('--prompt_length', type=int, default=10)
-parser.add_argument('--name', type=str, default='vpt_deep_tuned_cifar-lt') # 决定保存模型的位置
+parser.add_argument('--name', type=str, default='phase1_cifar-lt') # 决定保存模型的位置
 parser.add_argument('--base_model', type=str, default='vit_base_patch16_224_in21k')
+parser.add_argument('--tau', type=float, default=1.0, help='logit adjustment factor')
+
 
 def setup_seed(seed):  # setting up the random seed
     import random
@@ -134,8 +141,25 @@ def main(args):
     log(f"train dataset: {len(train_dataset)} samples")
     log(f"val dataset: {len(val_dataset)} samples")
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=8, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=int(args.batch_size), shuffle=False)
+
+    label_freq_array = np.array(list(train_dataset.label_freq.values()))
+    label_freq_array = label_freq_array / label_freq_array.sum()
+    adjustments = np.log(label_freq_array ** args.tau + 1e-12)
+    adjustments = torch.from_numpy(adjustments)
+    adjustments = adjustments.to(device)
+    criterion = AGCL(cls_num_list=list(train_dataset.label_freq.values()), m=0.1, s=20, weight=None, train_cls=False, noise_mul=0.5, gamma=4.)
+    # criterion = nn.CrossEntropyLoss()
+
+    train_sampler = ClassAwareSampler(train_dataset, num_samples_cls=4) 
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
+                            sampler=train_sampler, shuffle=False, 
+                              num_workers=8, pin_memory=True, 
+                              drop_last=False) # 去掉最后一个不完整的batch，dualloss才需要
+    val_loader = DataLoader(val_dataset, 
+                            batch_size=int(args.batch_size),
+                            shuffle=False)
+    
+
 
     model = build_promptmodel(num_classes=num_classes, img_size=args.image_size, 
                               base_model=args.base_model, model_idx='ViT', patch_size=16,
@@ -148,9 +172,10 @@ def main(args):
     
 
     optimizer = optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=args.momentum)
+    # optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     steps_per_epoch = len(train_loader)
-    scheduler = OneCycleLR(optimizer, max_lr=args.lr, steps_per_epoch=steps_per_epoch, epochs=args.epochs, pct_start=0.2)
-    criterion = nn.CrossEntropyLoss()
+    # scheduler = OneCycleLR(optimizer, max_lr=args.lr, steps_per_epoch=steps_per_epoch, epochs=args.epochs, pct_start=0.2)
+    scheduler = CosineLRScheduler(optimizer, warmup_lr_init=1e-6, t_initial=args.epochs, cycle_decay=0.1, warmup_t=args.warmup_epochs)
     
     
     model.Freeze()

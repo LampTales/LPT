@@ -19,9 +19,11 @@ from utils import *
 from loss import ASLSingleLabel, EQLv2
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default='cifar100')
-parser.add_argument('--split', type=str, default='1000')
-parser.add_argument('--data_path', type=str, default='data/')
+# parser.add_argument('--dataset', type=str, default='cifar100')
+parser.add_argument('--dataset', type=str, default='places365')
+# parser.add_argument('--split', type=str, default='1000')
+parser.add_argument('--split', type=str, default='full')
+parser.add_argument('--data_path', type=str, default='data/') # Places 
 parser.add_argument('--batch_size', type=int, default=256)
 parser.add_argument('--base_lr', type=float, default=0.02)
 parser.add_argument('--lr', type=float, default=0.005)
@@ -59,15 +61,15 @@ def main(args):
     #                   'std': [0.229, 0.224, 0.225]}
     normalize = transforms.Normalize(**norm_params)
     train_transforms = transforms.Compose([
-                transforms.RandomResizedCrop(args.image_size),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
+                transforms.RandomResizedCrop(args.image_size), # 裁剪，然后变回指定大小（224）
+                transforms.RandomHorizontalFlip(), # 随机水平翻转
+                transforms.ToTensor(), 
                 normalize,
             ])
     val_transforms = transforms.Compose([
             #transforms.Resize((args.image_size, args.image_size)),
             transforms.Resize((args.image_size * 8 // 7, args.image_size * 8 // 7)),
-            transforms.CenterCrop((args.image_size, args.image_size)),
+            transforms.CenterCrop((args.image_size, args.image_size)), # 裁剪之后只剩下中心，然后变回指定大小
             transforms.ToTensor(),
             normalize,
         ])
