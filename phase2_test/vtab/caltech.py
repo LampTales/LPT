@@ -93,7 +93,8 @@ class Caltech101(VisionDataset):
             for c in self._image_files:
                 self._labels.append(self.class_to_index[c.split("/")[0]])
         
-        if type is not 'all':
+        # if type is not 'all':
+        if type!='all':
             trainval_count = len(self._labels)
             train_count = (_TRAIN_SPLIT_PERCENT * trainval_count) // 100
             if type == 'train1000':
