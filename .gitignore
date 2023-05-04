@@ -5,7 +5,7 @@ tensorboard_log
 wandb
 data
 # 参数文件
-.pth
+*.pth
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
