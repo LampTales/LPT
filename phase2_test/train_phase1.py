@@ -8,21 +8,8 @@
  - ClassAwareSampler
 
 """
-from comet_ml import Experiment
-from clearml import Task
-import wandb
-from tensorboardX import SummaryWriter
 
-from accelerate import Accelerator
-from accelerate.utils import LoggerType
-
-accelerator = Accelerator(split_batches=True,
-                        #   log_with=[LoggerType.WANDB, LoggerType.TENSORBOARD
-                        #             # , LoggerType.COMETML
-                        #             ],
-                        #   logging_dir="./tensorboard"
-                          ) # batch_size 始终由用户控制，不随GPU数量变化
-
+from tracking_boilderplates import *
 
 import torch
 import torch.nn as nn
@@ -44,29 +31,6 @@ from PromptModels.GetPromptModel import build_promptmodel
 from timm.scheduler import CosineLRScheduler
 from cb_loss import AGCL
 from sampler import ClassPrioritySampler, ClassAwareSampler, BalancedDatasetSampler, CBEffectNumSampler
-
-
-
-
-tensorboard = None
-def init_trackers(args, project_name='Long-tailed Prompt Tuning', task_name='Tune VPT on CIFAR-LT'):
-    if not accelerator.is_main_process: return
-    # experiment = Experiment(
-    #     api_key = "IU7r6xQZEkzR7BZRy0q7juJPe",
-    #     project_name = project_name,
-    #     workspace="2catycm"
-    # )
-    global tensorboard
-    tensorboard = SummaryWriter('./tensorboard_log')
-    # wandb.init(
-    #         project=project_name,
-    #         name=task_name
-    # )
-    # wandb.config.update(args)
-    task = Task.init(project_name=project_name, 
-                     task_name=task_name)
-    
-
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, default='imbalancedcifar100_100')
@@ -224,11 +188,7 @@ def main(args):
             aves['tl'].add(loss.item())
             aves['ta'].add(acc)
             
-            # accelerator.log({'train_loss':loss.item(), "train_accuracy":acc})
-            if accelerator.is_main_process:
-                # wandb.log({'train_loss':loss.item(), "train_accuracy":acc})
-                tensorboard.add_scalar('train_loss', loss.item())
-                tensorboard.add_scalar('train_accuracy', acc)
+            report_train(loss, acc, epoch, iter_num, train_loader)
             iter_num += 1
         # print()
         if epoch%4==0:
@@ -245,11 +205,8 @@ def main(args):
                 aves['vl'].add(loss.item())
                 aves['va'].add(acc)
                 
-                # accelerator.log({'val_loss':loss.item(), "val_accuracy":acc})
-                if accelerator.is_main_process:
-                    # wandb.log({'val_loss':loss.item(), "val_accuracy":acc})
-                    tensorboard.add_scalar('val_loss', loss.item())
-                    tensorboard.add_scalar('val_accuracy', acc)
+                report_test(loss, acc, epoch)
+
                 
             log_str = 'epoch {}, lr: {:.4f}, train loss: {:.4f}|acc: {:.4f}'.format(
                     epoch, scheduler.get_last_lr()[0], aves['tl'].v, aves['ta'].v)
