@@ -20,7 +20,8 @@ def build_promptmodel(num_classes=2, img_size=224, model_idx='ViT', patch_size=1
         base_state_dict = basic_model.state_dict()
         del base_state_dict['head.weight']
         del base_state_dict['head.bias']
-        model = VPT_ViT(num_classes=num_classes, img_size=img_size, patch_size=patch_size, Prompt_Token_num=Prompt_Token_num,
+        model = VPT_ViT(num_classes=num_classes, img_size=img_size, patch_size=patch_size, 
+                        Prompt_Token_num=Prompt_Token_num,
                         VPT_type=VPT_type, pool_size=pool_size)
 
         model.load_state_dict(base_state_dict, False)

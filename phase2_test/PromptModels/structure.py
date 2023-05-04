@@ -98,10 +98,20 @@ class NormedLinear(nn.Module):
 
 class PromptLearner(nn.Module):
     def __init__(self, num_classes, prompt_length, prompt_depth, prompt_channels):
+        """_summary_
+
+        Args:
+            num_classes (int): 最后分类的时候变成几个类
+            prompt_length (int): 每个地方插入几个Prompt
+            prompt_depth (int): ViT有几层需要插入Prompt
+            prompt_channels (int): 表示一个prompt的嵌入维度
+        """
         super().__init__()
-        self.Prompt_Tokens = nn.Parameter(torch.zeros(prompt_depth, prompt_length, prompt_channels))
+        # 这些参数被 VPT_ViT 插入
+        self.Prompt_Tokens = nn.Parameter(torch.zeros(prompt_depth, prompt_length, prompt_channels)) # 
+        # 这个就是cosine classifier
         self.head = NormedLinear(prompt_channels, num_classes)
-        trunc_normal_(self.Prompt_Tokens, std=.02)
+        trunc_normal_(self.Prompt_Tokens, std=.02) # 使用高斯分布初始化，超出边界的会trunc
         #trunc_normal_(self.head.weight, std=.02)
     def forward(self, x):
         return self.head(x)
@@ -131,12 +141,12 @@ class VPT_ViT(VisionTransformer):
             for i in range(depth)])
         self.dropout = nn.Dropout(0.1)
         self.prompt_learner = PromptLearner(num_classes, Prompt_Token_num, depth, embed_dim)
-        self.head = nn.Identity()
+        self.head = nn.Identity() # Prompt Learner的 head后面还有一层head
 
     # def New_CLS_head(self, new_classes=15):
     #     self.head = nn.Linear(self.embed_dim, new_classes)
     #     trunc_normal_(self.head.weight, std=.02)
-
+    
     def Freeze(self):
         for param in self.parameters():
             param.requires_grad_(False)
@@ -146,12 +156,14 @@ class VPT_ViT(VisionTransformer):
             param.requires_grad_(True)
 
     def obtain_prompt(self):
+        # 导出prompt
         prompt_state_dict = {'head': self.head.state_dict(),
                              'Prompt_Tokens': self.Prompt_Tokens}
         # print(prompt_state_dict)
         return prompt_state_dict
 
     def load_prompt(self, prompt_state_dict):
+        # 导入prompt
         self.head.load_state_dict(prompt_state_dict['head'])
         self.Prompt_Tokens = prompt_state_dict['Prompt_Tokens']
 

@@ -116,9 +116,21 @@ class VPT_ViT(VisionTransformer):
                  act_layer=nn.GELU, weight_init='', Prompt_Token_num=1, VPT_type="Deep", topk=2, pool_size=20, share_blocks=6):
 
         # Recreate ViT
-        super().__init__(img_size, patch_size, in_chans, num_classes, embed_dim, depth, num_heads, mlp_ratio, qkv_bias,
-                         representation_size, distilled, drop_rate, attn_drop_rate, drop_path_rate, embed_layer,
-                         norm_layer, act_layer, weight_init)
+        ## representation_size (Optional[int]): enable and set representation layer (pre-logits) to this value if set
+            # distilled (bool): model includes a distillation token and head as in DeiT models
+       
+        super().__init__(img_size, patch_size, in_chans, 
+                         num_classes, 
+                        #  global_pool='token', 
+                         embed_dim=embed_dim, 
+                         depth=depth, 
+                         num_heads=num_heads, 
+                         mlp_ratio=mlp_ratio, qkv_bias=qkv_bias,
+                         representation_size=representation_size, 
+                         distilled=distilled, 
+                         drop_rate=drop_rate, attn_drop_rate=attn_drop_rate, drop_path_rate=drop_path_rate,
+                         embed_layer=embed_layer,
+                         norm_layer=norm_layer, act_layer=act_layer, weight_init=weight_init)
 
         self.VPT_type = VPT_type
         self.topk = topk
