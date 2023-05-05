@@ -14,6 +14,8 @@ class IMBALANCECIFAR10(torchvision.datasets.CIFAR10):
     cls_num = 10
 
     def __init__(self, phase, imbalance_ratio, transform, root = '/gruntdata5/kaihua/datasets', imb_type='exp'):
+        self.imb_type = imb_type
+        self.imb_factor = imbalance_ratio
         train = True if phase == "train" else False
         super(IMBALANCECIFAR10, self).__init__(root, train, transform=None, target_transform=None, download=True)
         self.train = train
@@ -49,7 +51,10 @@ class IMBALANCECIFAR10(torchvision.datasets.CIFAR10):
         return class_dict
 
 
-    def get_img_num_per_cls(self, cls_num, imb_type, imb_factor):
+    def get_img_num_per_cls(self, cls_num=None, imb_type=None, imb_factor=None):
+        cls_num = cls_num or self.cls_num
+        imb_type = imb_type or self.imb_type
+        imb_factor = imb_factor or self.imb_factor
         img_max = len(self.data) / cls_num
         img_num_per_cls = []
         if imb_type == 'exp':

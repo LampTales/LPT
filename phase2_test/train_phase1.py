@@ -106,12 +106,12 @@ def main(args):
     log(f"val dataset: {len(val_dataset)} samples")
 
 
-    label_freq_array = np.array(list(train_dataset.label_freq.values()))
-    label_freq_array = label_freq_array / label_freq_array.sum()
+    label_num_array = np.array(train_dataset.get_img_num_per_cls())
+    label_freq_array = label_num_array / label_num_array.sum()
     adjustments = np.log(label_freq_array ** args.tau + 1e-12)
     adjustments = torch.from_numpy(adjustments)
     adjustments = adjustments.to(device)
-    criterion = AGCL(cls_num_list=list(train_dataset.label_freq.values()), m=0.1, s=20, weight=None, train_cls=False, noise_mul=0.5, gamma=4.)
+    criterion = AGCL(cls_num_list=list(label_num_array), m=0.1, s=20, weight=None, train_cls=False, noise_mul=0.5, gamma=4.)
     # criterion = nn.CrossEntropyLoss()
 
     train_sampler = ClassAwareSampler(train_dataset, num_samples_cls=4) 
