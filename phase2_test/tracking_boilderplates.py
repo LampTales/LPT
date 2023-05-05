@@ -17,11 +17,11 @@ accelerator = Accelerator(split_batches=True,
 tensorboard = None
 def init_trackers(args, project_name='Long-tailed Prompt Tuning', task_name='Tune VPT on CIFAR-LT'):
     if not accelerator.is_main_process: return
-    experiment = Experiment(
-        api_key = "IU7r6xQZEkzR7BZRy0q7juJPe",
-        project_name = project_name,
-        workspace="2catycm"
-    )
+    # experiment = Experiment(
+    #     api_key = "IU7r6xQZEkzR7BZRy0q7juJPe",
+    #     project_name = project_name,
+    #     workspace="2catycm"
+    # )
     global tensorboard
     tensorboard = SummaryWriter('./tensorboard_log')
     # wandb.init(

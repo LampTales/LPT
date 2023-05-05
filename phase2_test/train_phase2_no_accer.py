@@ -36,8 +36,7 @@ parser.add_argument('--split', type=str, default='full')
 parser.add_argument('--data_path', type=str, default='data/')
 # parser.add_argument('--batch_size', type=int, default=128)
 # parser.add_argument('--batch_size', type=int, default=64)
-# parser.add_argument('--batch_size', type=int, default=32)
-parser.add_argument('--batch_size', type=int, default=20)
+parser.add_argument('--batch_size', type=int, default=32)
 # parser.add_argument('--batch_size', type=int, default=16)
 
 # parser.add_argument('--base_lr', type=float, default=0.02)
@@ -73,20 +72,18 @@ def setup_seed(seed):  # setting up the random seed
 def main(args):
     setup_seed(42)
     # save_path = os.path.join('./save', args.name)
-    if accelerator.is_main_process:
-        save_path = Path('save')/args.name
-        i = 0
-        while True:
-            try_path = save_path/ f'exp{i}'
-            if not try_path.exists():
-                save_path = try_path
-                ensure_path(save_path.as_posix())
-                break
-            i+=1
-        # ensure_path(save_path)
-        set_log_path(save_path)
-    # device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    device = accelerator.device
+    save_path = Path('save')/args.name
+    i = 0
+    while True:
+        try_path = save_path/ f'exp{i}'
+        if not try_path.exists():
+            save_path = try_path
+            ensure_path(save_path.as_posix())
+            break
+        i+=1
+    # ensure_path(save_path)
+    set_log_path(save_path)
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     args.lr = args.base_lr * args.batch_size / 256
     # labels = torch.ones(batch_size).long()  # long ones
@@ -124,11 +121,11 @@ def main(args):
     train_sampler = ClassAwareSampler(train_dataset, num_samples_cls=4) 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
                             sampler=train_sampler, shuffle=False, 
-                              num_workers=2, pin_memory=False, 
+                              num_workers=8, pin_memory=True, 
                               drop_last=True) # 去掉最后一个不完整的batch，dualloss才需要
     train_loader_ibs = DataLoader(train_dataset, batch_size=args.batch_size,
                               shuffle=True, 
-                              num_workers=2, pin_memory=False, 
+                              num_workers=8, pin_memory=True, 
                               drop_last=True) # 去掉最后一个不完整的batch，dualloss才需要
     
     val_loader = DataLoader(val_dataset, 
@@ -153,7 +150,11 @@ def main(args):
     for param in extractor.parameters():
         param.requires_grad_(False)
     extractor.eval()
-    extractor = accelerator.prepare(extractor)
+    # extractor = accelerator.prepare(extractor)
+    extractor = extractor.to(device)
+    extractor = nn.DataParallel(extractor)
+    # extractor = torch.compile(extractor)
+    
     # extractor 现在只是一个函数，没有反向传播。 不过也需要编译和放到GPU上
     
      # model 是 phase2 的模型，用 PromptModels_pool文件夹下的结构加载
@@ -179,14 +180,16 @@ def main(args):
     model.prompt_learner.Prompt_Tokens.requires_grad_(False) # 去除phase1的内容
     # 注意Prompt_Tokens_pool 没有锁住，现在phase2要训练
     
-    # model = torch.nn.parallel.DataParallel(model)
+    model = model.to(device)
+    model = torch.nn.parallel.DataParallel(model)
     # model = torch.compile(model, mode='max-autotune')
     
-    model, optimizer, train_loader, scheduler = accelerator.prepare(
-        model, optimizer, train_loader, scheduler
-    )
+    # model, optimizer, train_loader, scheduler = accelerator.prepare(
+    #     model, optimizer, train_loader, scheduler
+    # )
     
-    val_loader = accelerator.prepare(val_loader)
+    
+    # val_loader = accelerator.prepare(val_loader)
 
 
     # preds = model(data)  # (1, class_number)
@@ -227,8 +230,8 @@ def main(args):
                 0.0, (0.5 * (args.epochs - epoch) / args.epochs)
                 ) * (criterion_ibs(outputs_ibs, targets_ibs) - 0.5 * reduced_sim_ibs)
 
-            # loss.backward()
-            accelerator.backward(loss)
+            loss.backward()
+            # accelerator.backward(loss)
             
             optimizer.step()
             # scheduler.step()
@@ -250,8 +253,8 @@ def main(args):
                 with torch.no_grad():
                     outputs, reduced_sim = model(imgs)
                     
-                    outputs, targets, reduced_sim = accelerator.gather_for_metrics(
-                        (outputs, targets, reduced_sim))
+                    # outputs, targets, reduced_sim = accelerator.gather_for_metrics(
+                    #     (outputs, targets, reduced_sim))
                     
                     _, preds = outputs.detach().cpu().topk(1, 1, True, True)
                     preds = preds.squeeze(-1)
@@ -297,24 +300,22 @@ def main(args):
                 'state_dict': model.state_dict(),
                 'val_acc': aves['va'].v,
             }
-            if accelerator.is_main_process:
-                if epoch <= args.epochs:
-                    accelerator.save(save_obj, os.path.join(save_path, 'epoch-last.pth'))
-                    # torch.save(save_obj, os.path.join(save_path, 'epoch-last.pth'))
-                    
-                    accelerator.save(save_obj, os.path.join(
-                        save_path, 'epoch-{}.pth'.format(epoch)))
-                    # torch.save(save_obj, os.path.join(
-                    #                     save_path, 'epoch-{}.pth'.format(epoch)))
+            if epoch <= args.epochs:
+                # accelerator.save(save_obj, os.path.join(save_path, 'epoch-last.pth'))
+                torch.save(save_obj, os.path.join(save_path, 'epoch-last.pth'))
+                
+                # accelerator.save(save_obj, os.path.join(
+                #     save_path, 'epoch-{}.pth'.format(epoch)))
+                torch.save(save_obj, os.path.join(
+                                    save_path, 'epoch-{}.pth'.format(epoch)))
 
-                    if aves['va'].v > max_va:
-                        max_va = aves['va'].v
-                        accelerator.save(save_obj, os.path.join(save_path, 'max-va.pth'))
-                        # torch.save(save_obj, os.path.join(save_path, 'max-va.pth'))
-                else:
-                    accelerator.save(save_obj, os.path.join(save_path, 'epoch-ex.pth'))
-                    # torch.save(save_obj, os.path.join(save_path, 'epoch-ex.pth'))
-                # scheduler.step(epoch)
+                if aves['va'].v > max_va:
+                    max_va = aves['va'].v
+                    # accelerator.save(save_obj, os.path.join(save_path, 'max-va.pth'))
+                    torch.save(save_obj, os.path.join(save_path, 'max-va.pth'))
+            else:
+                # accelerator.save(save_obj, os.path.join(save_path, 'epoch-ex.pth'))
+                torch.save(save_obj, os.path.join(save_path, 'epoch-ex.pth'))
 
 if __name__ == "__main__":
     
