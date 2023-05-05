@@ -238,4 +238,3 @@ if __name__ == "__main__":
                             #   }})
     
     main(args)
-    accelerator.end_training()
