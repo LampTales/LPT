@@ -278,4 +278,5 @@ def create_datasets(data_path, train_transforms, val_transforms, name='cifar100'
             return Places365_LT_full_datasets('/data/dataset/Place_365_Standard', 
                                               train_transforms, val_transforms)
         elif name == 'imagenet_lt':
-            return ImageNet_LT_full_datasets('/home/ubuntu/dongbowen/data/imagenet/', train_transforms, val_transforms)
+            # return ImageNet_LT_full_datasets('/home/ubuntu/dongbowen/data/imagenet/', train_transforms, val_transforms)
+            return ImageNet_LT_full_datasets('/data/dataset/ImageNet/tiny-imagenet-200', train_transforms, val_transforms)

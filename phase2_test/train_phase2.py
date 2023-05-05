@@ -1,12 +1,9 @@
 """
-训练高级VPT（Phase1）
-- 首先是在IN21K上学习过的ViT
-- 在CIFAR100-LT上面提示微调
-- 加入大量bag of tricks
- - CosineLRScheduler
- - AGCL
- - ClassAwareSampler
-
+训练高级VPT（Phase2）
+- 在Phase 1的基础上
+- 冻结第一步所有参数
+- 第二步增加一个类别匹配表
+- 在最后L-K层插入更多的Token
 """
 
 from tracking_boilderplates import *
@@ -27,6 +24,7 @@ from pathlib import Path
 import torch.backends.cudnn
 
 from PromptModels.GetPromptModel import build_promptmodel
+from PromptModels_pool.GetPromptModel import build_promptmodel as build_promptmodel_pool
 
 from timm.scheduler import CosineLRScheduler
 from cb_loss import AGCL
@@ -38,15 +36,15 @@ parser.add_argument('--split', type=str, default='full')
 parser.add_argument('--data_path', type=str, default='data/')
 # parser.add_argument('--batch_size', type=int, default=128)
 # parser.add_argument('--batch_size', type=int, default=64)
-# parser.add_argument('--batch_size', type=int, default=32)
-parser.add_argument('--batch_size', type=int, default=16)
+parser.add_argument('--batch_size', type=int, default=32)
+# parser.add_argument('--batch_size', type=int, default=16)
 
 # parser.add_argument('--base_lr', type=float, default=0.02)
 # parser.add_argument('--lr', type=float, default=0.005)
 # parser.add_argument('--base_lr', type=float, default=3e-5)
 # parser.add_argument('--lr', type=float, default=3e-5)
-parser.add_argument('--base_lr', type=float, default=0.0025)
-parser.add_argument('--lr', type=float, default=0.000625)
+parser.add_argument('--base_lr', type=float, default=0.0025*2)
+parser.add_argument('--lr', type=float, default=0.000625*2)
 
 
 parser.add_argument('--momentum', type=float, default=0.9)
@@ -58,7 +56,7 @@ parser.add_argument('--warmup_epochs', type=int, default=1)
 parser.add_argument('--optimizer', type=str, default='sgd')
 parser.add_argument('--scheduler', type=str, default='cosine')
 parser.add_argument('--prompt_length', type=int, default=10)
-parser.add_argument('--name', type=str, default='phase1_cifar-lt') # 决定保存模型的位置
+parser.add_argument('--name', type=str, default='phase2_cifar-lt') # 决定保存模型的位置
 parser.add_argument('--base_model', type=str, default='vit_base_patch16_224_in21k')
 parser.add_argument('--tau', type=float, default=1.0, help='logit adjustment factor')
 
@@ -119,26 +117,50 @@ def main(args):
     adjustments = torch.from_numpy(adjustments)
     adjustments = adjustments.to(device)
     criterion = AGCL(cls_num_list=list(label_num_array), m=0.1, s=20, weight=None, train_cls=False, noise_mul=0.5, gamma=4.)
-    # criterion = nn.CrossEntropyLoss()
+    criterion_ibs = AGCL(gamma_pos=0.5, gamma_neg=8.0, cls_num_list=list(label_num_array), m=0.1, s=20, weight=None, train_cls=False, noise_mul=0.5, gamma=4.)
 
     train_sampler = ClassAwareSampler(train_dataset, num_samples_cls=4) 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
                             sampler=train_sampler, shuffle=False, 
                               num_workers=8, pin_memory=True, 
-                              drop_last=False) # 去掉最后一个不完整的batch，dualloss才需要
+                              drop_last=True) # 去掉最后一个不完整的batch，dualloss才需要
+    train_loader_ibs = DataLoader(train_dataset, batch_size=args.batch_size,
+                              shuffle=True, 
+                              num_workers=8, pin_memory=True, 
+                              drop_last=True) # 去掉最后一个不完整的batch，dualloss才需要
+    
     val_loader = DataLoader(val_dataset, 
                             batch_size=int(args.batch_size),
                             shuffle=False)
     
 
-
-    model = build_promptmodel(num_classes=num_classes, img_size=args.image_size, 
+    # extractor 是 phase1 的模型，用 PromptModels文件夹下的结构加载
+    extractor = build_promptmodel(num_classes=num_classes, img_size=args.image_size, 
                               base_model=args.base_model, model_idx='ViT', patch_size=16,
                             Prompt_Token_num=args.prompt_length, VPT_type="Deep")  # VPT_type = "Shallow"
-    # test for updating 不影响正常运行
-    # prompt_state_dict = model.obtain_prompt()
-    # model.load_prompt(prompt_state_dict)
-    # model = model.to(device)
+    ckpt = torch.load('save/phase1_cifar-lt/exp34/max-va.pth', 'cpu')['state_dict']
+    # ckpt = torch.load('LPT_places.pth', 'cpu')['state_dict']
+    if list(ckpt.keys())[0].startswith('module'):
+       ckpt_new = {}
+       for key in ckpt.keys():
+           ckpt_new[key[7:]] = ckpt[key]
+       ckpt = ckpt_new
+    extractor.load_state_dict(ckpt)
+    extractor.prompt_learner.head = nn.Identity() # 把phase1的head去掉，这样就可以把token留下来。
+
+    for param in extractor.parameters():
+        param.requires_grad_(False)
+    extractor.eval()
+    extractor = accelerator.prepare(extractor)
+    # extractor 现在只是一个函数，没有反向传播。 不过也需要编译和放到GPU上
+    
+     # model 是 phase2 的模型，用 PromptModels_pool文件夹下的结构加载
+    model = build_promptmodel_pool(num_classes=num_classes, img_size=args.image_size, base_model=args.base_model, model_idx='ViT', patch_size=16,
+                            Prompt_Token_num=args.prompt_length, VPT_type="Deep")  # VPT_type = "Shallow"
+    # 用phase1的参数初始化phase2的模型。 这是为了实现前面L层共享
+    model.load_state_dict(ckpt, strict=False) 
+
+    
     
     
     if args.optimizer.lower() == 'sgd':
@@ -151,7 +173,10 @@ def main(args):
     scheduler = CosineLRScheduler(optimizer, warmup_lr_init=1e-6, t_initial=args.epochs, cycle_decay=0.1, warmup_t=args.warmup_epochs)
     
     
-    model.Freeze()
+    model.Freeze() # 只把prompt_learner参数启用
+    model.prompt_learner.Prompt_Tokens.requires_grad_(False) # 去除phase1的内容
+    # 注意Prompt_Tokens_pool 没有锁住，现在phase2要训练
+    
     # model = torch.nn.parallel.DataParallel(model)
     # model = torch.compile(model, mode='max-autotune')
     
@@ -181,13 +206,25 @@ def main(args):
         aves = {k: Averager() for k in aves_keys}
         iter_num = 0
         model.train()
+        cnt = 0
         for imgs, targets in tqdm(train_loader, desc='train', leave=False):
+            # 同时加载两个loader，一个做了CB采样，一个没有做
+            imgs_ibs, targets_ibs = next(iter(train_loader_ibs)) 
+            if cnt > len(train_dataset) // args.batch_size:
+                break
+            cnt += 1
             imgs = imgs.to(device)
             targets = targets.to(device)
+            imgs_ibs, targets_ibs = imgs_ibs.to(device), targets_ibs.to(device)
+            
             optimizer.zero_grad()
-            outputs = model(imgs)
+            outputs, reduced_sim = model(imgs)
+            outputs_ibs, reduced_sim_ibs = model(imgs_ibs)
             with accelerator.autocast(): # mixed precision
-                loss = criterion(outputs, targets)
+                loss = criterion(outputs, targets) - 0.5 * reduced_sim + max(
+                0.0, (0.5 * (args.epochs - epoch) / args.epochs)
+                ) * (criterion_ibs(outputs_ibs, targets_ibs) - 0.5 * reduced_sim_ibs)
+
             # loss.backward()
             accelerator.backward(loss)
             
@@ -203,14 +240,22 @@ def main(args):
         scheduler.step(epoch+1)
         if epoch%4==0:
             model.eval()
+            total_outputs = []
+            total_labels = []
             for imgs, targets in tqdm(val_loader, desc='val', leave=False):
                 imgs = imgs.to(device)
                 targets = targets.to(device)
-                outputs = model(imgs)
-                
-                outputs, targets = accelerator.gather_for_metrics((outputs, targets))
-                
-                loss = criterion(outputs, targets)
+                with torch.no_grad():
+                    outputs, reduced_sim = model(imgs)
+                    
+                    outputs, targets, reduced_sim = accelerator.gather_for_metrics(
+                        (outputs, targets, reduced_sim))
+                    
+                    _, preds = outputs.detach().cpu().topk(1, 1, True, True)
+                    preds = preds.squeeze(-1)
+                    total_outputs.append(preds)
+                    total_labels.append(targets.detach().cpu())
+                    loss = criterion(outputs, targets)
                 acc = compute_acc(outputs, targets)
                 aves['vl'].add(loss.item())
                 aves['va'].add(acc)
@@ -218,22 +263,36 @@ def main(args):
                 report_test(loss, acc, epoch)
 
                 
-            # log_str = 'epoch {}, lr: {:.4f}, train loss: {:.4f}|acc: {:.4f}'.format(
-                    # epoch, scheduler.get_last_lr()[0], aves['tl'].v, aves['ta'].v)
+            total_outputs = torch.cat(total_outputs, dim=0)
+            total_labels = torch.cat(total_labels, dim=0)
+            # per-class evaluation
+            shot_cnt_stats = {
+                    'total': [0, label_num_array.max(), 0, 0, 0.],
+                    'many': [100, label_num_array.max(), 0, 0, 0.],
+                    'medium': [20, 100, 0, 0, 0.],
+                    'few': [0, 20, 0, 0, 0.],
+                }
+            for l in torch.unique(total_labels):
+                class_correct = torch.sum((total_outputs[total_labels == l] == total_labels[total_labels == l])).item()
+                test_class_count = len(total_labels[total_labels == l])
+                for stat_name in shot_cnt_stats:
+                    stat_info = shot_cnt_stats[stat_name]
+                    if label_num_array[l] > stat_info[0] and label_num_array[l] <= stat_info[1]:
+                        stat_info[2] += class_correct
+                        stat_info[3] += test_class_count
+            for stat_name in shot_cnt_stats:
+                shot_cnt_stats[stat_name][-1] = shot_cnt_stats[stat_name][2] / shot_cnt_stats[stat_name][3] * 100.0 if shot_cnt_stats[stat_name][3] != 0 else 0.
+            per_cls_eval_str = 'epoch {}, overall: {:.5f}%, many-shot: {:.5f}%, medium-shot: {:.5f}%, few-shot: {:.5f}%'.format(epoch, shot_cnt_stats['total'][-1], shot_cnt_stats['many'][-1], shot_cnt_stats['medium'][-1], shot_cnt_stats['few'][-1])
+            log(per_cls_eval_str)
             log_str = 'epoch {}, train {:.4f}|{:.4f}'.format(
-                epoch, aves['tl'].v, aves['ta'].v)
-            log_str += ', val loss: {:.4f}|acc: {:.4f}'.format(aves['vl'].v, aves['va'].v)
-            # log(log_str)
-            print_main_process(log_str)
-            
+                    epoch, aves['tl'].v, aves['ta'].v)
+            log_str += ', val {:.4f}|{:.4f}'.format(aves['vl'].v, aves['va'].v)
+            log(log_str)
             # preds = model(data)  # (1, class_number)
-            print('After Tuning model output: ', aves['va'].v)
-            accelerator.wait_for_everyone()
-            unwrapped_model = accelerator.unwrap_model(model)
-            
+            print('After Tuning model output：', aves['va'].v)
             save_obj = {
                 'config': vars(args),
-                'state_dict': unwrapped_model.state_dict(),
+                'state_dict': model.state_dict(),
                 'val_acc': aves['va'].v,
             }
             if epoch <= args.epochs:

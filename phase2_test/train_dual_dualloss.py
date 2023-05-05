@@ -30,12 +30,12 @@ from loss import ASLSingleLabel, EQLv2
 from cb_loss import AGCL
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default='cifar100')
-parser.add_argument('--split', type=str, default='1000')
+parser.add_argument('--dataset', type=str, default='imbalancedcifar100_100')
+parser.add_argument('--split', type=str, default='full')
 parser.add_argument('--data_path', type=str, default='data/')
-parser.add_argument('--batch_size', type=int, default=256)
-parser.add_argument('--base_lr', type=float, default=0.02)
-parser.add_argument('--lr', type=float, default=0.005)
+parser.add_argument('--batch_size', type=int, default=64)
+parser.add_argument('--base_lr', type=float, default=0.02/4)
+parser.add_argument('--lr', type=float, default=0.005/4)
 parser.add_argument('--momentum', type=float, default=0.9)
 parser.add_argument('--weight_decay', type=float, default=0.01)
 parser.add_argument('--image_size', type=int, default=224)
@@ -158,7 +158,8 @@ def main(args):
         # model.Freeze()
         cnt = 0
         for imgs, targets in tqdm(train_loader, desc='train', leave=False):
-            imgs_ibs, targets_ibs = next(iter(train_loader_ibs)) # 两个都加载？
+            # 同时加载两个loader，一个做了CB采样，一个没有做
+            imgs_ibs, targets_ibs = next(iter(train_loader_ibs)) 
             if cnt > len(train_dataset) // args.batch_size:
                 break
             cnt += 1
@@ -168,7 +169,9 @@ def main(args):
             optimizer.zero_grad()
             outputs, reduced_sim = model(imgs)
             outputs_ibs, reduced_sim_ibs = model(imgs_ibs)
-            loss = criterion(outputs, targets) - 0.5 * reduced_sim + max(0.0, (0.5 * (args.epochs - epoch) / args.epochs)) * (criterion_ibs(outputs_ibs, targets_ibs) - 0.5 * reduced_sim_ibs)
+            loss = criterion(outputs, targets) - 0.5 * reduced_sim + max(
+                0.0, (0.5 * (args.epochs - epoch) / args.epochs)
+                ) * (criterion_ibs(outputs_ibs, targets_ibs) - 0.5 * reduced_sim_ibs)
             # 两个都训练
             loss.backward()
             optimizer.step()

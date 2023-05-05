@@ -177,15 +177,15 @@ class VPT_ViT(VisionTransformer):
         x = self.pos_drop(x + self.pos_embed)
 
         if self.VPT_type == "Deep":
-
+            
+            # 每一层插入几个Token
             Prompt_Token_num = self.prompt_learner.Prompt_Tokens.shape[1]
-
             for i in range(len(self.blocks)):
                 # concatenate Prompt_Tokens
                 Prompt_Tokens = self.prompt_learner.Prompt_Tokens[i].unsqueeze(0)
                 x = torch.cat((x, Prompt_Tokens.expand(x.shape[0], -1, -1)), dim=1)
-                num_tokens = x.shape[1]
-                x = self.blocks[i](x)[:, :num_tokens - Prompt_Token_num]
+                num_tokens = x.shape[1] # x 是 (batch, 196, 16*16*3)
+                x = self.blocks[i](x)[:, :num_tokens - Prompt_Token_num] # 为了实现方便，算完之后再取需要的
 
         else:  # self.VPT_type == "Shallow"
             # concatenate Prompt_Tokens
