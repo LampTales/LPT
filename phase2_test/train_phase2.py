@@ -31,8 +31,11 @@ from cb_loss import AGCL
 from sampler import ClassPrioritySampler, ClassAwareSampler, BalancedDatasetSampler, CBEffectNumSampler
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default='imbalancedcifar100_100')
+# parser.add_argument('--dataset', type=str, default='imbalancedcifar100_100')
+# parser.add_argument('--split', type=str, default='full')
+parser.add_argument('--dataset', type=str, default='CUB_BTI')
 parser.add_argument('--split', type=str, default='full')
+
 parser.add_argument('--data_path', type=str, default='data/')
 # parser.add_argument('--batch_size', type=int, default=128)
 # parser.add_argument('--batch_size', type=int, default=64)
@@ -52,12 +55,15 @@ parser.add_argument('--momentum', type=float, default=0.9)
 parser.add_argument('--weight_decay', type=float, default=0.01)
 # parser.add_argument('--weight_decay', type=float, default=0.03)
 parser.add_argument('--image_size', type=int, default=224)
-parser.add_argument('--epochs', type=int, default=90)
+# parser.add_argument('--epochs', type=int, default=90)
+parser.add_argument('--epochs', type=int, default=150)
 parser.add_argument('--warmup_epochs', type=int, default=1)
 parser.add_argument('--optimizer', type=str, default='sgd')
 parser.add_argument('--scheduler', type=str, default='cosine')
-parser.add_argument('--prompt_length', type=int, default=10)
-parser.add_argument('--name', type=str, default='phase2_cifar-lt') # 决定保存模型的位置
+# parser.add_argument('--prompt_length', type=int, default=10)
+parser.add_argument('--prompt_length', type=int, default=40)
+# parser.add_argument('--name', type=str, default='phase2_cifar-lt') # 决定保存模型的位置
+parser.add_argument('--name', type=str, default='phase2_CUB_BTI') # 决定保存模型的位置
 parser.add_argument('--base_model', type=str, default='vit_base_patch16_224_in21k')
 parser.add_argument('--tau', type=float, default=1.0, help='logit adjustment factor')
 
@@ -94,12 +100,17 @@ def main(args):
                        'std': [0.229, 0.224, 0.225]}
     normalize = transforms.Normalize(**norm_params)
     train_transforms = transforms.Compose([
+                transforms.Grayscale(num_output_channels=3),
+        
                 transforms.RandomResizedCrop(args.image_size),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 normalize,
             ])
     val_transforms = transforms.Compose([
+                transforms.Grayscale(num_output_channels=3),
+        
+
             transforms.Resize((args.image_size * 8 // 7, args.image_size * 8 // 7)),
             transforms.CenterCrop((args.image_size, args.image_size)),
             transforms.ToTensor(),
@@ -113,7 +124,17 @@ def main(args):
     log(f"val dataset: {len(val_dataset)} samples")
 
 
-    label_num_array = np.array(train_dataset.get_img_num_per_cls())
+    label_num_array = None
+    try:
+        label_num_array = np.array(train_dataset.get_img_num_per_cls())
+    except:
+        train_dataset.labels = np.empty(len(train_dataset), dtype=np.int64)
+        label_num_array = np.zeros(num_classes)
+        for i in range(len(train_dataset)):
+            label_num_array[train_dataset[i][1]] += 1
+            train_dataset.labels[i] = train_dataset[i][1]
+    
+    
     label_freq_array = label_num_array / label_num_array.sum()
     adjustments = np.log(label_freq_array ** args.tau + 1e-12)
     adjustments = torch.from_numpy(adjustments)
@@ -140,7 +161,8 @@ def main(args):
     extractor = build_promptmodel(num_classes=num_classes, img_size=args.image_size, 
                               base_model=args.base_model, model_idx='ViT', patch_size=16,
                             Prompt_Token_num=args.prompt_length, VPT_type="Deep")  # VPT_type = "Shallow"
-    ckpt = torch.load('save/phase1_cifar-lt/exp34/max-va.pth', 'cpu')['state_dict']
+    # ckpt = torch.load('save/phase1_cifar-lt/exp34/max-va.pth', 'cpu')['state_dict']
+    ckpt = torch.load('save/phase1_CUB_BTI/exp29/max-va.pth', 'cpu')['state_dict']
     # ckpt = torch.load('LPT_places.pth', 'cpu')['state_dict']
     if list(ckpt.keys())[0].startswith('module'):
        ckpt_new = {}
@@ -195,7 +217,7 @@ def main(args):
     # check backwarding tokens
     for param in model.parameters():
         if param.requires_grad:
-            print(param.shape)
+            print_main_process(param.shape)
     max_va = -1
     
     
@@ -236,9 +258,8 @@ def main(args):
             aves['tl'].add(loss.item())
             aves['ta'].add(acc)
             
-            report_train(loss, acc, epoch, iter_num, train_loader)
             iter_num += 1
-        # print()
+        report_train(aves['tl'].v, aves['ta'].v, epoch)
         scheduler.step(epoch+1)
         if epoch%4==0:
             model.eval()
@@ -262,7 +283,7 @@ def main(args):
                 aves['vl'].add(loss.item())
                 aves['va'].add(acc)
                 
-                report_test(loss, acc, epoch)
+                
 
                 
             total_outputs = torch.cat(total_outputs, dim=0)
@@ -285,18 +306,23 @@ def main(args):
             for stat_name in shot_cnt_stats:
                 shot_cnt_stats[stat_name][-1] = shot_cnt_stats[stat_name][2] / shot_cnt_stats[stat_name][3] * 100.0 if shot_cnt_stats[stat_name][3] != 0 else 0.
             per_cls_eval_str = 'epoch {}, overall: {:.5f}%, many-shot: {:.5f}%, medium-shot: {:.5f}%, few-shot: {:.5f}%'.format(epoch, shot_cnt_stats['total'][-1], shot_cnt_stats['many'][-1], shot_cnt_stats['medium'][-1], shot_cnt_stats['few'][-1])
-            log(per_cls_eval_str)
+            # log(per_cls_eval_str)
+            print_main_process(per_cls_eval_str)
             log_str = 'epoch {}, train {:.4f}|{:.4f}'.format(
                     epoch, aves['tl'].v, aves['ta'].v)
             log_str += ', val {:.4f}|{:.4f}'.format(aves['vl'].v, aves['va'].v)
-            log(log_str)
+            # log(log_str)
+            print_main_process(log_str)
             # preds = model(data)  # (1, class_number)
-            print('After Tuning model output：', aves['va'].v)
+            print_main_process('After Tuning model output：', aves['va'].v)
             save_obj = {
                 'config': vars(args),
                 'state_dict': model.state_dict(),
                 'val_acc': aves['va'].v,
             }
+            
+            report_test(aves['vl'].v, aves['va'].v, epoch)
+            
             if accelerator.is_main_process:
                 if epoch <= args.epochs:
                     accelerator.save(save_obj, os.path.join(save_path, 'epoch-last.pth'))
