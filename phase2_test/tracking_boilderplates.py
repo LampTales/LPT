@@ -37,14 +37,10 @@ def print_main_process(*args, **kwargs):
     if accelerator.is_main_process:
         print(*args, **kwargs)
 
-def report_train(loss, acc, epoch, iter_num, train_loader):
+def report_train(loss, acc, epoch):
     if accelerator.is_main_process:
-        # wandb.log({'train_loss':loss.item(), "train_accuracy":acc})
-        # tensorboard.add_scalars({'train_loss':loss.item(), "train_accuracy":acc}, 
-        #                         global_step=global_step)
-        global_step=epoch*len(train_loader)+iter_num
-        tensorboard.add_scalar('train_loss', loss.item(), global_step=global_step)
-        tensorboard.add_scalar('train_accuracy', acc,  global_step=global_step)
+        tensorboard.add_scalar('train_loss', loss.item(), global_step=epoch)
+        tensorboard.add_scalar('train_accuracy', acc,  global_step=epoch)
         
 def report_test(loss, acc, epoch):
     if accelerator.is_main_process:
