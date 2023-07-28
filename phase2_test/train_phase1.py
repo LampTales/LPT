@@ -33,7 +33,9 @@ from cb_loss import AGCL
 from sampler import ClassPrioritySampler, ClassAwareSampler, BalancedDatasetSampler, CBEffectNumSampler
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default='imbalancedcifar100_100')
+# parser.add_argument('--dataset', type=str, default='imbalancedcifar100_100')
+# parser.add_argument('--dataset', type=str, default='cifar100')
+parser.add_argument('--dataset', type=str, default='CUB_BTI')
 parser.add_argument('--split', type=str, default='full')
 parser.add_argument('--data_path', type=str, default='data/')
 # parser.add_argument('--batch_size', type=int, default=128)
@@ -45,7 +47,9 @@ parser.add_argument('--batch_size', type=int, default=16)
 # parser.add_argument('--lr', type=float, default=0.005)
 # parser.add_argument('--base_lr', type=float, default=3e-5)
 # parser.add_argument('--lr', type=float, default=3e-5)
-parser.add_argument('--base_lr', type=float, default=0.0025)
+# parser.add_argument('--base_lr', type=float, default=0.0025)
+parser.add_argument('--base_lr', type=float, default=0.0020)
+# parser.add_argument('--base_lr', type=float, default=0.00025)
 parser.add_argument('--lr', type=float, default=0.000625)
 
 
@@ -53,13 +57,23 @@ parser.add_argument('--momentum', type=float, default=0.9)
 parser.add_argument('--weight_decay', type=float, default=0.01)
 # parser.add_argument('--weight_decay', type=float, default=0.03)
 parser.add_argument('--image_size', type=int, default=224)
-parser.add_argument('--epochs', type=int, default=90)
+# parser.add_argument('--epochs', type=int, default=90)
+parser.add_argument('--epochs', type=int, default=150)
 parser.add_argument('--warmup_epochs', type=int, default=1)
 parser.add_argument('--optimizer', type=str, default='sgd')
 parser.add_argument('--scheduler', type=str, default='cosine')
-parser.add_argument('--prompt_length', type=int, default=10)
-parser.add_argument('--name', type=str, default='phase1_cifar-lt') # 决定保存模型的位置
+# parser.add_argument('--prompt_length', type=int, default=10)
+# parser.add_argument('--prompt_length', type=int, default=20)
+parser.add_argument('--prompt_length', type=int, default=40)
+# 0.8657 acc: 0.5521
+
+# parser.add_argument('--prompt_length', type=int, default=5)
+# parser.add_argument('--name', type=str, default='phase1_cifar-lt') # 决定保存模型的位置
+# parser.add_argument('--name', type=str, default='phase1_cifar100_pt100') # 决定保存模型的位置
+parser.add_argument('--name', type=str, default='phase1_CUB_BTI') # 决定保存模型的位置
 parser.add_argument('--base_model', type=str, default='vit_base_patch16_224_in21k')
+# parser.add_argument('--base_model', type=str, default='vit_large_patch16_224_in21k')
+# parser.add_argument('--base_model', type=str, default='vit_base_patch16_224_miil_in21k')
 parser.add_argument('--tau', type=float, default=1.0, help='logit adjustment factor')
 
 
@@ -90,16 +104,24 @@ def main(args):
     
     args.lr = args.base_lr * args.batch_size / 256
     # labels = torch.ones(batch_size).long()  # long ones
+    
+    # 从 imagenet 统计出来的规律
     norm_params = {'mean': [0.485, 0.456, 0.406],
                        'std': [0.229, 0.224, 0.225]}
     normalize = transforms.Normalize(**norm_params)
     train_transforms = transforms.Compose([
+        # 没加之前，是 0.8769/0.5208
+        # 转为灰度图  0.9142/0.5208
+                transforms.Grayscale(num_output_channels=3),
                 transforms.RandomResizedCrop(args.image_size),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 normalize,
             ])
     val_transforms = transforms.Compose([
+        # 转为灰度图
+            transforms.Grayscale(num_output_channels=3), 
+            
             transforms.Resize((args.image_size * 8 // 7, args.image_size * 8 // 7)),
             transforms.CenterCrop((args.image_size, args.image_size)),
             transforms.ToTensor(),
@@ -113,7 +135,18 @@ def main(args):
     log(f"val dataset: {len(val_dataset)} samples")
 
 
-    label_num_array = np.array(train_dataset.get_img_num_per_cls())
+    # TODO： 把dataset换掉，其实就是pytorch的dataset对象而已，有[]和len方法
+    # 换成官网的CIFAR100，包括coarse labels和fine labels
+    label_num_array = None
+    try:
+        label_num_array = np.array(train_dataset.get_img_num_per_cls())
+    except:
+        train_dataset.labels = np.empty(len(train_dataset), dtype=np.int64)
+        label_num_array = np.zeros(num_classes)
+        for i in range(len(train_dataset)):
+            label_num_array[train_dataset[i][1]] += 1
+            train_dataset.labels[i] = train_dataset[i][1]
+    
     label_freq_array = label_num_array / label_num_array.sum()
     adjustments = np.log(label_freq_array ** args.tau + 1e-12)
     adjustments = torch.from_numpy(adjustments)
@@ -168,7 +201,7 @@ def main(args):
     # check backwarding tokens
     for param in model.parameters():
         if param.requires_grad:
-            print(param.shape)
+            print_main_process(param.shape)
     max_va = -1
     
     
@@ -176,7 +209,7 @@ def main(args):
     # model.load_state_dict(ckpt)
     
     for epoch in range(args.epochs):
-        print('epoch:',epoch)
+        print_main_process('epoch:',epoch)
         aves_keys = ['tl', 'ta', 'vl', 'va']
         aves = {k: Averager() for k in aves_keys}
         iter_num = 0
@@ -197,9 +230,9 @@ def main(args):
             aves['tl'].add(loss.item())
             aves['ta'].add(acc)
             
-            report_train(loss, acc, epoch, iter_num, train_loader)
             iter_num += 1
-        # print()
+        report_train(aves['tl'].v, aves['ta'].v, epoch)
+
         scheduler.step(epoch+1)
         if epoch%4==0:
             model.eval()
@@ -215,7 +248,7 @@ def main(args):
                 aves['vl'].add(loss.item())
                 aves['va'].add(acc)
                 
-                report_test(loss, acc, epoch)
+                
 
                 
             # log_str = 'epoch {}, lr: {:.4f}, train loss: {:.4f}|acc: {:.4f}'.format(
@@ -224,10 +257,11 @@ def main(args):
                 epoch, aves['tl'].v, aves['ta'].v)
             log_str += ', val loss: {:.4f}|acc: {:.4f}'.format(aves['vl'].v, aves['va'].v)
             # log(log_str)
+            report_test(aves['vl'].v, aves['va'].v, epoch)
             print_main_process(log_str)
             
             # preds = model(data)  # (1, class_number)
-            print('After Tuning model output: ', aves['va'].v)
+            print_main_process('After Tuning model output: ', aves['va'].v)
             accelerator.wait_for_everyone()
             unwrapped_model = accelerator.unwrap_model(model)
             
