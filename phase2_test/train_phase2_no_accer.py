@@ -121,11 +121,11 @@ def main(args):
     train_sampler = ClassAwareSampler(train_dataset, num_samples_cls=4) 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
                             sampler=train_sampler, shuffle=False, 
-                              num_workers=8, pin_memory=True, 
+                              num_workers=4, pin_memory=True, 
                               drop_last=True) # 去掉最后一个不完整的batch，dualloss才需要
     train_loader_ibs = DataLoader(train_dataset, batch_size=args.batch_size,
                               shuffle=True, 
-                              num_workers=8, pin_memory=True, 
+                              num_workers=4, pin_memory=True, 
                               drop_last=True) # 去掉最后一个不完整的batch，dualloss才需要
     
     val_loader = DataLoader(val_dataset, 
@@ -182,7 +182,7 @@ def main(args):
     
     model = model.to(device)
     model = torch.nn.parallel.DataParallel(model)
-    # model = torch.compile(model, mode='max-autotune')
+    # model = torch.compile(model, mode[]='max-autotune')
     
     # model, optimizer, train_loader, scheduler = accelerator.prepare(
     #     model, optimizer, train_loader, scheduler
@@ -229,9 +229,8 @@ def main(args):
                 loss = criterion(outputs, targets) - 0.5 * reduced_sim + max(
                 0.0, (0.5 * (args.epochs - epoch) / args.epochs)
                 ) * (criterion_ibs(outputs_ibs, targets_ibs) - 0.5 * reduced_sim_ibs)
-
-            loss.backward()
-            # accelerator.backward(loss)
+                loss.backward()
+                # accelerator.backward(loss)
             
             optimizer.step()
             # scheduler.step()

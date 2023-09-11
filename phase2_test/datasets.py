@@ -12,6 +12,8 @@ from vtab.imbalanced_cifar import IMBALANCECIFAR100
 from vtab.LT_dataset import LT_Dataset
 from vtab.LT_dataset_twoview import LT_Dataset_twoview
 
+from vtab.my_datasets import CUB_BTI
+
 
 def cifar100_1k_datasets(data_path, train_transforms, val_transforms, download=True):
     train_set = CIFAR100(data_path, train=True, transform=train_transforms, download=download, type='train1000')
@@ -32,6 +34,22 @@ def cifar100_full_datasets(data_path, train_transforms, val_transforms, download
     num_classes = 100
     return train_set, val_set, num_classes
     raise NotImplementedError
+
+import vtab.coarse_cifar100 as coarse_cifar100
+def coarse_cifar100_full_datasets(data_path, train_transforms, val_transforms, download=False):
+    train_set = coarse_cifar100.CIFAR100(data_path, train=True, transform=train_transforms, download=download)
+    val_set = coarse_cifar100.CIFAR100(data_path, train=False, transform=val_transforms, download=download)
+    num_classes = 20
+    return train_set, val_set, num_classes
+    raise NotImplementedError
+
+
+def cub_bti_full_datasets(data_path, train_transforms, val_transforms, download=False):
+    train_set = CUB_BTI(transform=train_transforms, type='train', target='器名')
+    val_set = CUB_BTI(transform=val_transforms, type='test', target='器名')
+    num_classes = train_set.num_classes()
+    return train_set, val_set, num_classes
+
 
 def flowers102_1k_datasets(data_path, train_transforms, val_transforms, download=False):
     train_set = Flowers102(data_path, split='train', transform=train_transforms, download=download, type='train1000')
@@ -252,8 +270,12 @@ def create_datasets(data_path, train_transforms, val_transforms, name='cifar100'
         elif name == 'eurosat':
             return eurosat_800_200_datasets(data_path, train_transforms, val_transforms)
     elif type == 'full':
-        if name == 'cifar100':
+        if name=='CUB_BTI':
+            return cub_bti_full_datasets(data_path, train_transforms, val_transforms)
+        elif name == 'cifar100':
             return cifar100_full_datasets(data_path, train_transforms, val_transforms)
+        elif name == 'coarse_cifar100':
+            return coarse_cifar100_full_datasets(data_path, train_transforms, val_transforms)
         elif name == 'flowers102':
             return flowers102_full_datasets(data_path, train_transforms, val_transforms)
         elif name == 'caltech101':

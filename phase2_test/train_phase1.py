@@ -34,23 +34,35 @@ from sampler import ClassPrioritySampler, ClassAwareSampler, BalancedDatasetSamp
 
 parser = argparse.ArgumentParser()
 # parser.add_argument('--dataset', type=str, default='imbalancedcifar100_100')
-# parser.add_argument('--dataset', type=str, default='cifar100')
-parser.add_argument('--dataset', type=str, default='CUB_BTI')
+parser.add_argument('--dataset', type=str, default='coarse_cifar100')
+# parser.add_argument('--dataset', type=str, default='CUB_BTI')
 parser.add_argument('--split', type=str, default='full')
 parser.add_argument('--data_path', type=str, default='data/')
+
 # parser.add_argument('--batch_size', type=int, default=128)
-# parser.add_argument('--batch_size', type=int, default=64)
+# batch_size = 64
+batch_size = 16
+parser.add_argument('--batch_size', type=int, default=batch_size)
+
 # parser.add_argument('--batch_size', type=int, default=32)
-parser.add_argument('--batch_size', type=int, default=16)
+
+# parser.add_argument('--batch_size', type=int, default=16)
+
+# parser.add_argument('--base_lr', type=float, default=0.01/128*batch_size/4)
+# parser.add_argument('--lr', type=float, default=0.0025/128*batch_size/4)
+
 
 # parser.add_argument('--base_lr', type=float, default=0.02)
 # parser.add_argument('--lr', type=float, default=0.005)
+# parser.add_argument('--base_lr', type=float, default=0.0020)
+# parser.add_argument('--base_lr', type=float, default=0.00025)
+# parser.add_argument('--lr', type=float, default=0.000625)
+
 # parser.add_argument('--base_lr', type=float, default=3e-5)
 # parser.add_argument('--lr', type=float, default=3e-5)
-# parser.add_argument('--base_lr', type=float, default=0.0025)
-parser.add_argument('--base_lr', type=float, default=0.0020)
-# parser.add_argument('--base_lr', type=float, default=0.00025)
-parser.add_argument('--lr', type=float, default=0.000625)
+
+parser.add_argument('--base_lr', type=float, default=0.1)
+parser.add_argument('--lr', type=float, default=0.1)
 
 
 parser.add_argument('--momentum', type=float, default=0.9)
@@ -60,8 +72,12 @@ parser.add_argument('--image_size', type=int, default=224)
 # parser.add_argument('--epochs', type=int, default=90)
 parser.add_argument('--epochs', type=int, default=150)
 parser.add_argument('--warmup_epochs', type=int, default=1)
+# parser.add_argument('--optimizer', type=str, default='sgd')
 parser.add_argument('--optimizer', type=str, default='sgd')
 parser.add_argument('--scheduler', type=str, default='cosine')
+
+# enable_scheduler = True
+enable_scheduler = False
 # parser.add_argument('--prompt_length', type=int, default=10)
 # parser.add_argument('--prompt_length', type=int, default=20)
 parser.add_argument('--prompt_length', type=int, default=40)
@@ -70,7 +86,8 @@ parser.add_argument('--prompt_length', type=int, default=40)
 # parser.add_argument('--prompt_length', type=int, default=5)
 # parser.add_argument('--name', type=str, default='phase1_cifar-lt') # 决定保存模型的位置
 # parser.add_argument('--name', type=str, default='phase1_cifar100_pt100') # 决定保存模型的位置
-parser.add_argument('--name', type=str, default='phase1_CUB_BTI') # 决定保存模型的位置
+parser.add_argument('--name', type=str, default='phase1_cifar100_coarse') # 决定保存模型的位置
+# parser.add_argument('--name', type=str, default='phase1_CUB_BTI') # 决定保存模型的位置
 parser.add_argument('--base_model', type=str, default='vit_base_patch16_224_in21k')
 # parser.add_argument('--base_model', type=str, default='vit_large_patch16_224_in21k')
 # parser.add_argument('--base_model', type=str, default='vit_base_patch16_224_miil_in21k')
@@ -112,7 +129,7 @@ def main(args):
     train_transforms = transforms.Compose([
         # 没加之前，是 0.8769/0.5208
         # 转为灰度图  0.9142/0.5208
-                transforms.Grayscale(num_output_channels=3),
+                # transforms.Grayscale(num_output_channels=3),
                 transforms.RandomResizedCrop(args.image_size),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
@@ -120,7 +137,7 @@ def main(args):
             ])
     val_transforms = transforms.Compose([
         # 转为灰度图
-            transforms.Grayscale(num_output_channels=3), 
+            # transforms.Grayscale(num_output_channels=3), 
             
             transforms.Resize((args.image_size * 8 // 7, args.image_size * 8 // 7)),
             transforms.CenterCrop((args.image_size, args.image_size)),
@@ -131,8 +148,8 @@ def main(args):
     train_dataset, val_dataset, num_classes = create_datasets(
         args.data_path, train_transforms, val_transforms, 
         args.dataset, args.split)
-    log(f"train dataset: {len(train_dataset)} samples")
-    log(f"val dataset: {len(val_dataset)} samples")
+    print_main_process(f"train dataset: {len(train_dataset)} samples")
+    print_main_process(f"val dataset: {len(val_dataset)} samples")
 
 
     # TODO： 把dataset换掉，其实就是pytorch的dataset对象而已，有[]和len方法
@@ -181,7 +198,7 @@ def main(args):
 
     steps_per_epoch = len(train_loader)
     # scheduler = OneCycleLR(optimizer, max_lr=args.lr, steps_per_epoch=steps_per_epoch, epochs=args.epochs, pct_start=0.2)
-    scheduler = CosineLRScheduler(optimizer, warmup_lr_init=1e-6, t_initial=args.epochs, cycle_decay=0.1, warmup_t=args.warmup_epochs)
+    scheduler = CosineLRScheduler(optimizer, warmup_lr_init=args.lr, t_initial=args.epochs, cycle_decay=0.1, warmup_t=args.warmup_epochs)
     
     
     model.Freeze()
@@ -225,7 +242,8 @@ def main(args):
             accelerator.backward(loss)
             
             optimizer.step()
-            # scheduler.step()
+            if enable_scheduler:
+                scheduler.step()
             acc = compute_acc(outputs, targets)
             aves['tl'].add(loss.item())
             aves['ta'].add(acc)

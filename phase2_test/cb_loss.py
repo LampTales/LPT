@@ -131,9 +131,9 @@ class AGCL(nn.Module):
 
 
     def forward(self, cosine, target):
-        index = torch.zeros_like(cosine, dtype=torch.uint8)
+        # index = torch.zeros_like(cosine, dtype=torch.uint8)
+        index = torch.zeros_like(cosine, dtype=torch.bool)
         index.scatter_(1, target.data.view(-1, 1), 1)
-
         noise = self.simpler.sample(cosine.shape).clamp(-1, 1).to(cosine.device) #self.scale(torch.randn(cosine.shape).to(cosine.device))
 
         #cosine = cosine - self.noise_mul * noise/self.m_list.max() *self.m_list

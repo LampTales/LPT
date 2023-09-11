@@ -32,7 +32,7 @@ def ensure_path(path, remove=True):
             shutil.rmtree(path)
             os.makedirs(path)
     else:
-        os.makedirs(path)
+        os.makedirs(path, exist_ok=True)
 
 def set_log_path(path):
     global _log_path

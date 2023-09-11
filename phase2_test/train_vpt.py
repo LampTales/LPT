@@ -32,7 +32,8 @@ from pathlib import Path
 import torch.backends.cudnn
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default='imbalancedcifar100_100')
+# parser.add_argument('--dataset', type=str, default='imbalancedcifar100_100')
+parser.add_argument('--dataset', type=str, default='cifar100')
 parser.add_argument('--split', type=str, default='full')
 parser.add_argument('--data_path', type=str, default='data/')
 # parser.add_argument('--batch_size', type=int, default=128)
@@ -138,7 +139,7 @@ def main(args):
     # check backwarding tokens
     for param in model.parameters():
         if param.requires_grad:
-            print(param.shape)
+            print_main_process(param.shape)
     max_va = -1
     
     
@@ -146,7 +147,7 @@ def main(args):
     # model.load_state_dict(ckpt)
     
     for epoch in range(args.epochs):
-        print('epoch:',epoch)
+        print_main_process('epoch:',epoch)
         aves_keys = ['tl', 'ta', 'vl', 'va']
         aves = {k: Averager() for k in aves_keys}
         iter_num = 0
@@ -192,7 +193,7 @@ def main(args):
             log_str += ', val loss: {:.4f}|acc: {:.4f}'.format(aves['vl'].v, aves['va'].v)
             log(log_str)
             # preds = model(data)  # (1, class_number)
-            print('After Tuning model output: ', aves['va'].v)
+            print_main_process('After Tuning model output: ', aves['va'].v)
             accelerator.wait_for_everyone()
             unwrapped_model = accelerator.unwrap_model(model)
             
